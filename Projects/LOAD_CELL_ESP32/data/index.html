@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>TESTE ESTÁTICO</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" type="text/css" href="style.css">
+    <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+</head>
+<body>
+    <div class="topnav">
+        Dashboard - Teste Estático
+        <div class="datetime" id="datetime"></div>
+        <div class="brand">Asa Branca</div>
+    </div>
+
+    <div class="container">
+        <div class="sidebar">
+            <div class="sidebar-text">Informações</div>
+            <div class="card">
+                <p class="card-title">Status</p>
+                <p class="card-info" id="status_info">None</p>
+            </div>
+            <div class="card">
+                <p class="card-title">Cartão SD</p>
+                <p class="card-info" id="sd_info">None</p>
+            </div>
+            <div class="card">Card 3</div>
+            <div class="card">Card 4</div>
+            <div class="card">Card 5</div>
+        </div>
+
+        <div class="buttons">
+            <button class="button">Iniciar amostragem</button>
+            <button class="button">Botão 2</button>
+            <button class="button">Botão 3</button>
+            <button class="button">Botão 4</button>
+            <button class="button">Botão 5</button>
+        </div>
+
+        <div class="main">
+            <canvas id="myChart"></canvas>
+            <div class="log" id="log"></div>
+        </div>
+        <div class="footer">
+            Asa Branca Aerospace - 2024
+        </div>
+    </div>
+    <script src="chart.umd.js"></script>
+    <script src="script.js"></script>
+    <script>
+        // Configuração do gráfico usando Chart.js
+        var ctx = document.getElementById('myChart').getContext('2d');
+        var myChart = new Chart(ctx, {
+            type: 'line', // ou 'bar', 'pie', etc.
+            data: {
+                labels: ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho'],
+                datasets: [{
+                    label: 'Exemplo de Dados',
+                    data: [12, 19, 3, 5, 2, 3],
+                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                    borderColor: 'rgba(75, 192, 192, 1)',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                scales: {
+                    yAxes: [{
+                        ticks: {
+                            beginAtZero: true
+                        }
+                    }]
+                }
+            }
+        });
+    </script>
+</body>
+</html>
