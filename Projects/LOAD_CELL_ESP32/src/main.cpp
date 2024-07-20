@@ -22,9 +22,14 @@ const float gravity = 9.789;
 int timeout = 10000;                /* timeout em milissegundos */
 File cfg;
 File log;
+String timestamp;
+bool sample_begin;
+/* Usuário e senha da rede local wifi */
 const char* ssid = "ESP32_AP";
 const char* password = "decola_asa";
+/* Inicia servidor assíncrono */
 AsyncWebServer server(80);
+/* Inicia comunicação via websocket */
 AsyncWebSocket ws("/ws");
 
 /* Protótipo de Funções */
@@ -53,12 +58,15 @@ void setup() {
 }
 
 void loop() {
-	server.handleClient();
 	long read = loadCell.get_units(1) * gravity;
-	if(read >= 10000.0){
+	while(timeout--){
+		if(read >= 10000.0){
 		Serial.println(read);
+		}
 	}
-	vTaskDelay(100);
+	
+	vTaskDelay(12);
+	ws.cleanupClients();
 }
 
 /* Funções */
@@ -156,6 +164,7 @@ void checkSDconfig(void){
 		return;
 	}		
 }
+
 /**
  * @brief Funcao para ler uma linha do arquivo de configuração
  * @return String contendo a leitura de uma linha do arquivo
@@ -190,7 +199,7 @@ void SDWriteLog(void){
  * @brief Função que envia a página html pela rota root.
  */
 void handleRoot(void) {
-	File file = SPIFFS.open("/index.html", "r");
+	File file = LittleFS.open("/index.html", "r");
   	if (!file) {
     	server.send(500, "text/plain", "Internal Server Error");
     	return;
@@ -242,14 +251,14 @@ void wifiInit(void){
 	Serial.println(IP);
 }
 /**
- * @brief Inicia o SPIFFS para ler os arquivos da página HTML.
+ * @brief Inicia o LittleFS para ler os arquivos da página HTML.
  * 
  * @return true, se obteve sucesso;
  * @return false, se houve erro
  */
-bool spiffsInit(void){
-	if (!SPIFFS.begin(true)) {
-    	Serial.println("Erro ao montar SPIFFS");
+bool littleFS_init(void){
+	if (!LittleFS.begin(true)) {
+    	Serial.println("Erro ao montar LittleFS");
     	return false;
   	}
 	else{
@@ -257,21 +266,63 @@ bool spiffsInit(void){
 	}
 }
 /**
- * @brief Inicia o servidor WEB. Se o SPIFFS não iniciar, o servidor
- * não iniciará.
+ * @brief Inicia o servidor websocket.
  */
-void serverInit(void){
-	if(spiffsInit()){
-		/* Define as rotas do servidor */
-		server.on("/", handleRoot);
-		server.on("/style.css", handleCSS);
-		server.on("/script.js", handleJS);
-		server.onNotFound(handleNotFound);
-		/* Inicia o servidor */
-		server.begin();
-		Serial.println("Servidor HTTP iniciado.");
+void initWebSocket(){
+	ws.onEvent(onEvent);
+	server.addHandler(&ws);
+	server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+	request->send(LittleFS, "/index.html", "text/html",false);
+	});
+	server.serveStatic("/", LittleFS, "/");
+	/* Inicia servidor */
+	server.begin();
+}
+
+void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,AwsEventType type, 
+	void *arg, uint8_t *data, size_t len) {
+	
+	switch (type) {
+		case WS_EVT_CONNECT:
+			Serial.printf("WebSocket client #%u connected from %s\n", client->id(), client->remoteIP().toString().c_str());
+			break;
+		case WS_EVT_DISCONNECT:
+			Serial.printf("WebSocket client #%u disconnected\n", client->id());
+			break;
+		case WS_EVT_DATA:
+			handleWebSocketMessage(arg, data, len);
+			break;
+		case WS_EVT_PONG:
+		case WS_EVT_ERROR:
+			break;
 	}
-	else{
-		Serial.println("Servidor HTTP nao iniciado.");
+}
+/**
+ * Recebe e trata as mensagens oriundas dos clientes.
+ */
+void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
+	
+	AwsFrameInfo *info = (AwsFrameInfo*)arg;
+	
+	if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
+		data[len] = 0;
+		if (strcmp((char*)data, "timestamp") == 0){
+			timestamp = (char*)data;
+		}
+		else if(strcmp((char*)data, "sample_begin") == 0){
+			sample_begin = true;
+		}
+		else if(strcmp((char*)data, "set_config") == 0){
+
+		}
+		else if(strcmp((char*)data, "calibrate") == 0){
+
+		}
 	}
+}
+/**
+ * Envia mensagens para todos os clientes.
+ */
+void notifyClients(String message) {
+	ws.textAll(message);
 }
