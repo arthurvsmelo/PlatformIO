@@ -13,8 +13,6 @@
 
 #define LOAD_CELL_DOUT GPIO_NUM_32
 #define LOAD_CELL_SCK  GPIO_NUM_33
-#define LED_STANDBY GPIO_NUM_16
-#define LED_ACTIVE GPIO_NUM_17
 #define CS GPIO_NUM_5           /* chip select do módulo SD card */
 /* 5: CS, 18: CLK, 19: MISO, 23: MOSI */
 
@@ -59,12 +57,6 @@ void loop() {
 	long read = loadCell.get_units(1) * gravity;
 	if(read >= 10000.0){
 		Serial.println(read);
-		gpio_set_level(LED_STANDBY, 0);
-		gpio_set_level(LED_ACTIVE, 1);
-	}
-	else{
-		gpio_set_level(LED_ACTIVE, 0);
-		gpio_set_level(LED_STANDBY, 1);
 	}
 	vTaskDelay(100);
 }
@@ -101,10 +93,6 @@ void gpio_init(void){
 	/* Pino CS (chip-select) precisa ser definido como OUTPUT para a biblioteca
 	   do cartão SD funcionar corretamente. */
 	gpio_set_direction(CS, GPIO_MODE_OUTPUT);
-	gpio_set_direction(LED_STANDBY, GPIO_MODE_OUTPUT);
-	gpio_set_direction(LED_ACTIVE, GPIO_MODE_OUTPUT);
-	gpio_set_level(LED_STANDBY, 1);
-	gpio_set_level(LED_ACTIVE, 0);
 }
 /**
  * @brief Inicializa o cartão SD. 
@@ -130,34 +118,38 @@ bool SDCardInit(void){
 void checkSDconfig(void){
 	if(SDCardInit()){
 		String temp;
+		/* checa se existe arquivo de configuração */
 		if(SD.exists("/config.txt")){
 			cfg = SD.open("/config.txt");
 			if(cfg){
 				/* escreve as configurações padrão */
-				cfg.println((String)cal_param);
-				cfg.println((String)timeout);
-				Serial.println("Configuracoes feitas!");
-			}
-			else{
-				Serial.println("Erro ao abrir arquivo de configuracao!");
-			}
-		}
-		else{
-			cfg = SD.open("/config.txt", FILE_WRITE);
-			if(cfg){
 				/* lê e define o fator de calibração */
 				temp = readLine();
 				cal_param = (float)temp.toInt();
 				/* lê define o timeout da amostragem */
 				temp = readLine();
 				timeout = temp.toInt();
-				Serial.println("Arquivo de configuracao criado.");
+				Serial.println("Configuracoes feitas!");
+				cfg.close();
+			}
+			else{
+				Serial.println("Erro ao abrir arquivo de configuracao!");
+			}
+		}
+		else{
+			/* se não existir arquivo de cfg, cria um novo */
+			cfg = SD.open("/config.txt", FILE_WRITE);
+			if(cfg){
+				/* escreve os valores padrão salvos hardcoded nas variaveis globais */
+				cfg.println((String)cal_param);
+				cfg.println((String)timeout);
+				Serial.println("Arquivo de configuracao criado com os valores padrão.");
+				cfg.close();
 			}
 			else{
 				Serial.println("Erro ao criar arquivo de configuracao!");
 			}
 		}
-		cfg.close();
 	}
 	else{
 		Serial.println("Falha na configuracao.");

@@ -13,7 +13,7 @@
         <div class="brand">Asa Branca</div>
     </div>
 
-    <div class="container">
+    <section class="container">
         <div class="sidebar">
             <div class="sidebar-text">Informações</div>
             <div class="card">
@@ -24,54 +24,29 @@
                 <p class="card-title">Cartão SD</p>
                 <p class="card-info" id="sd_info">None</p>
             </div>
-            <div class="card">Card 3</div>
-            <div class="card">Card 4</div>
-            <div class="card">Card 5</div>
+            <div class="card">
+                <p class="card-title">Leitura atual</p>
+                <p class="card-info" id="last_reading">None</p>
+            </div>
         </div>
 
         <div class="buttons">
-            <button class="button">Iniciar amostragem</button>
-            <button class="button">Botão 2</button>
-            <button class="button">Botão 3</button>
-            <button class="button">Botão 4</button>
-            <button class="button">Botão 5</button>
+            <button class="button" onclick="console.log(confirm('Deseja realmente iniciar?'));">Iniciar amostragem</button>
         </div>
 
         <div class="main">
-            <canvas id="myChart"></canvas>
+            <div class="chart">
+                <canvas id="myChart"></canvas>
+            </div>
             <div class="log" id="log"></div>
         </div>
-        <div class="footer">
-            Asa Branca Aerospace - 2024
-        </div>
+    </section>
+
+    <div class="footer">
+        Asa Branca Aerospace - 2024
     </div>
+
     <script src="chart.umd.js"></script>
     <script src="script.js"></script>
-    <script>
-        // Configuração do gráfico usando Chart.js
-        var ctx = document.getElementById('myChart').getContext('2d');
-        var myChart = new Chart(ctx, {
-            type: 'line', // ou 'bar', 'pie', etc.
-            data: {
-                labels: ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho'],
-                datasets: [{
-                    label: 'Exemplo de Dados',
-                    data: [12, 19, 3, 5, 2, 3],
-                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                    borderColor: 'rgba(75, 192, 192, 1)',
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                scales: {
-                    yAxes: [{
-                        ticks: {
-                            beginAtZero: true
-                        }
-                    }]
-                }
-            }
-        });
-    </script>
 </body>
 </html>

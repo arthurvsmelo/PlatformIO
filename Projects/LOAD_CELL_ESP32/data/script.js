@@ -22,7 +22,7 @@ function updateDateTime() {
 function dataStorage(){
 
 }
-var empuxo = [12, 19, 25, 30, 18, 20, 32, 25, 18, 27];
+var empuxo = [22, 24, 25, 30, 25, 28, 32, 25, 26, 27];
 var tempo = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 function drawChart(empuxo, tempo){
     // Configuração do gráfico usando Chart.js
