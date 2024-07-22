@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <HX711.h>
 #include <esp32-hal-gpio.h>
+#include <esp32-hal-timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <SPI.h>
@@ -16,14 +17,21 @@
 #define CS GPIO_NUM_5           /* chip select do módulo SD card */
 /* 5: CS, 18: CLK, 19: MISO, 23: MOSI */
 
+typedef struct config{
+	uint16_t timeout;
+	float cal_param;
+	float prop_mass;
+} config_params;
+
 HX711 loadCell;
 float cal_param = -268.20;
 const float gravity = 9.789;
-int timeout = 10000;                /* timeout em milissegundos */
+uint16_t timeout = 10000;                /* timeout em milissegundos */
 File cfg;
 File log;
 String timestamp;
-bool sample_begin;
+volatile uint16_t timer_count = 0;
+bool sample_isrunning;
 /* Usuário e senha da rede local wifi */
 const char* ssid = "ESP32_AP";
 const char* password = "decola_asa";
@@ -32,37 +40,44 @@ AsyncWebServer server(80);
 /* Inicia comunicação via websocket */
 AsyncWebSocket ws("/ws");
 
+void IRAM_ATTR Timer0_ISR()
+{
+	if(timer_count >= 65535)
+		timer_count = 0;
+	else
+    	timer_count++;
+}
+
 /* Protótipo de Funções */
 void calibrate(float weight);
-bool SDCardInit(void);
+bool initSDcard(void);
 void checkSDconfig(void);
+bool setConfig(String new_cfg);
 void SDWriteLog(void);
-void gpio_init(void);
 String readLine(void);
-void loadCellInit(void);
-void handleRoot(void);
-void handleCSS(void);
-void handleJS();
-bool spiffsInit(void);
-void handleNotFound(void);
-void wifiInit(void);
-void serverInit(void);
-
+void initLoadCell(void);
+bool initLittleFS(void);
+void initWifi(void);
+void initWebSocket(void);
+bool sample(void);
+void notifyClients(String message);
+void handleWebSocketMessage(void *arg, uint8_t *data, size_t len);
+void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,AwsEventType type, void *arg, uint8_t *data, size_t len);
+void setTimer(void);
 
 void setup() {
+	gpio_set_direction(CS, GPIO_MODE_OUTPUT);
 	Serial.begin(115200);
 	gpio_init();
-	loadCellInit();
-	wifiInit();
-	serverInit();	
+	initLoadCell();
+	initWifi();
+	initWebSocket();	
 }
 
 void loop() {
-	long read = loadCell.get_units(1) * gravity;
+	
 	while(timeout--){
-		if(read >= 10000.0){
-		Serial.println(read);
-		}
+		
 	}
 	
 	vTaskDelay(12);
@@ -93,20 +108,11 @@ void calibrate(float weight){
 	Serial.println(cal_param);
 	Serial.println("Calibrado!");
 }
-
-/**
- * @brief Inicializa todos os pinos necessários
- */
-void gpio_init(void){
-	/* Pino CS (chip-select) precisa ser definido como OUTPUT para a biblioteca
-	   do cartão SD funcionar corretamente. */
-	gpio_set_direction(CS, GPIO_MODE_OUTPUT);
-}
 /**
  * @brief Inicializa o cartão SD. 
  * 
  */
-bool SDCardInit(void){
+bool initSDcard(void){
 	if (!SD.begin(CS)) {
     	Serial.println("Falha na inicializacao.");
     	Serial.println("Cheque se ha cartao SD inserido ou se ha falha na conexao.");
@@ -124,7 +130,7 @@ bool SDCardInit(void){
  * arquivo com as configurações padrão.
  */
 void checkSDconfig(void){
-	if(SDCardInit()){
+	if(initSDcard()){
 		String temp;
 		/* checa se existe arquivo de configuração */
 		if(SD.exists("/config.txt")){
@@ -183,7 +189,7 @@ String readLine(void){
 /**
  * @brief Inicializa a célula de carga.
  */
-void loadCellInit(void){
+void initLoadCell(void){
 	loadCell.begin(LOAD_CELL_DOUT, LOAD_CELL_SCK, 128);
 	loadCell.set_scale(cal_param);
 	loadCell.tare();
@@ -195,56 +201,11 @@ void loadCellInit(void){
 void SDWriteLog(void){
 
 }
-/**
- * @brief Função que envia a página html pela rota root.
- */
-void handleRoot(void) {
-	File file = LittleFS.open("/index.html", "r");
-  	if (!file) {
-    	server.send(500, "text/plain", "Internal Server Error");
-    	return;
-  	}
-  	String html = file.readString();
-  	server.send(200, "text/html", html);
-  	file.close();
-}
-/**
- * @brief Função que envia a parte CSS da página html.
- */
-void handleCSS(void) {
-  	File file = SPIFFS.open("/style.css", "r");
-  	if (!file) {
-    	server.send(500, "text/plain", "Internal Server Error");
-    	return;
-  	}
-  	String css = file.readString();
-  	server.send(200, "text/css", css);
-  	file.close();
-}
-/**
- * @brief Função que envia a parte JavaScript da página html.
- */
-void handleJS() {
-  	File file = SPIFFS.open("/script.js", "r");
-  	if (!file) {
-    	server.send(500, "text/plain", "Internal Server Error");
-    	return;
-  	}
-  	String js = file.readString();
-  	server.send(200, "application/javascript", js);
-  	file.close();
-}
-/**
- * @brief Handle de rota não encontrada.
- */
-void handleNotFound(void) {
-	/* Página para rota não encontrada */
-	server.send(404, "text/plain", "404: Not found");
-}
+
 /**
  * @brief Inicia a WiFi como ponto de acesso.
  */
-void wifiInit(void){
+void initWifi(void){
 	WiFi.softAP(ssid, password);
 	IPAddress IP = WiFi.softAPIP();
 	Serial.print("IP do ponto de acesso: ");
@@ -256,7 +217,7 @@ void wifiInit(void){
  * @return true, se obteve sucesso;
  * @return false, se houve erro
  */
-bool littleFS_init(void){
+bool initLittleFS(void){
 	if (!LittleFS.begin(true)) {
     	Serial.println("Erro ao montar LittleFS");
     	return false;
@@ -268,7 +229,7 @@ bool littleFS_init(void){
 /**
  * @brief Inicia o servidor websocket.
  */
-void initWebSocket(){
+void initWebSocket(void){
 	ws.onEvent(onEvent);
 	server.addHandler(&ws);
 	server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
@@ -310,7 +271,7 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
 			timestamp = (char*)data;
 		}
 		else if(strcmp((char*)data, "sample_begin") == 0){
-			sample_begin = true;
+			/*sample_begin = true; */
 		}
 		else if(strcmp((char*)data, "set_config") == 0){
 
@@ -325,4 +286,47 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
  */
 void notifyClients(String message) {
 	ws.textAll(message);
+}
+
+bool sample(uint16_t timeout){
+	uint16_t last_timer_count_value = timer_count;
+	uint16_t n = 0;
+	long read;
+	long max_value = 0;
+	long read_values[2400];
+	uint16_t time[2400];
+	sample_isrunning = true;
+	/* captura a string com a data e o horario */
+	/* abre um arquivo de log na pasta /tests com o nome = data-hora */
+
+	while((timer_count - last_timer_count_value) <= timeout){
+		read = loadCell.get_units(1) * gravity;
+		if(read >= 10000.0){
+			read_values[n] = read;
+			time[n] = timer_count - last_timer_count_value;
+			/* salva a leitura no cartao sd */
+			/* envia uma string ou json contendo o valor */
+			if(read_values[n] > max_value)
+				max_value = read_values[n];
+		}
+		n++;
+	}
+	/* faz os calculos restantes */
+	/* escreve */
+	/* fecha o arquivo de log */
+	/* envia mensagem de término */
+	sample_isrunning = false;
+	return true;
+}
+
+void setTimer(void){
+	hw_timer_t *Timer0_Cfg = NULL;
+	Timer0_Cfg = timerBegin(0, 80, true);
+	timerAttachInterrupt(Timer0_Cfg, &Timer0_ISR, true);
+    timerAlarmWrite(Timer0_Cfg, 1000, true);
+    timerAlarmEnable(Timer0_Cfg);
+}
+
+bool setConfig(String new_cfg){
+
 }
