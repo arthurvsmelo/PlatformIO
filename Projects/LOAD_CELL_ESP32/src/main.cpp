@@ -28,11 +28,12 @@ config_t cfg;
 config_t *pCfg = &cfg;
 HX711 loadCell;
 const float gravity = 9.789;
-String timestamp;
+String hour;
+String date;
 File cfg_file;
 File log_file;
 volatile uint16_t timer_count = 0;
-bool sample_isrunning;
+bool start_sampling;
 /* Usuário e senha da rede local wifi */
 const char* ssid = "ESP32_AP";
 const char* password = "decola_asa";
@@ -53,14 +54,12 @@ void IRAM_ATTR Timer0_ISR()
 void calibrate(float weight);
 bool initSDcard(void);
 void checkSDconfig(config_t* cfg);
-bool setConfig(String new_cfg);
-void SDWriteLog(void);
 String readLine(void);
 void initLoadCell(void);
 bool initLittleFS(void);
 void initWifi(void);
 void initWebSocket(void);
-bool sample(void);
+void sample(config_t* cfg);
 void notifyClients(String message);
 void handleWebSocketMessage(void *arg, uint8_t *data, size_t len);
 void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,AwsEventType type, void *arg, uint8_t *data, size_t len);
@@ -69,16 +68,20 @@ void setTimer(void);
 void setup() {
 	gpio_set_direction(CS, GPIO_MODE_OUTPUT);
 	Serial.begin(115200);
-	gpio_init();
-	initLoadCell();
+	initLittleFS();
 	initWifi();
 	initWebSocket();
-
+	initLoadCell();
+	initSDcard();
 	checkSDconfig(pCfg);	
 }
 
 void loop() {
 	ws.cleanupClients();
+	if(start_sampling){
+		sample(&cfg);
+	}
+	vTaskDelay(10/portTICK_PERIOD_MS);
 }
 
 /* Funções */
@@ -272,8 +275,9 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
 		deserializeJson(json_data, data);
 		String type = json_data["type"];
 		if(type == "sample_begin"){
-			timestamp = (const char*)json_data["data"];
-			sample(&cfg);
+			date = (const char*)json_data["data"]["date"];
+			hour = (const char*)json_data["data"]["time"];
+			start_sampling = true;
 		}
 	}
 }
@@ -284,7 +288,8 @@ void notifyClients(String message) {
 	ws.textAll(message);
 }
 
-bool sample(config_t* cfg){
+void sample(config_t* cfg){
+	Serial.println("Iniciando amostragem...");
 	uint16_t last_timer_count_value = timer_count;
 	uint16_t time = 0;
 	long reading;
@@ -293,14 +298,14 @@ bool sample(config_t* cfg){
 	doc["type"] = "sample";
 	JsonObject obj = doc.createNestedObject("data");
 	/* abre um arquivo de log na pasta /tests com o nome = data-hora */
-	log_file = SD.open("/tests/"+ timestamp + ".txt", FILE_WRITE);
+	log_file = SD.open("/" + hour + ".txt", FILE_WRITE);
 	log_file.println("reading,time");
-	sample_isrunning = true;
 	notifyClients("{'type':'status_info','data':'Running'}");
 	while((timer_count - last_timer_count_value) <= cfg->timeout){
 		reading = loadCell.get_units(1) * gravity;
 		if(reading >= 10000.0){
 			time = timer_count - last_timer_count_value;
+			Serial.println(time);
 			/* salva a leitura no cartao sd */
 			if(log_file){
 				log_file.print(reading);
@@ -316,10 +321,10 @@ bool sample(config_t* cfg){
 		}
 	}
 	/* fecha o arquivo de log */
-	cfg_file.close();
-	sample_isrunning = false;
+	log_file.close();
+	start_sampling = false;
 	notifyClients("{'type':'status_info','data':'Not running'}");
-	return true;
+	Serial.println("Amostragem finalizada.");
 }
 
 void setTimer(void){
@@ -328,8 +333,4 @@ void setTimer(void){
 	timerAttachInterrupt(Timer0_Cfg, &Timer0_ISR, true);
     timerAlarmWrite(Timer0_Cfg, 1000, true);
     timerAlarmEnable(Timer0_Cfg);
-}
-
-bool setConfig(String new_cfg){
-	int i = 0;
 }

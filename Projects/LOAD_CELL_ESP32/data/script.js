@@ -4,9 +4,24 @@ var websocket;
 window.addEventListener('load', onLoad);
 
 // retorna uma string com a data e a hora, para servir de nome do arquivo de amostras 
-function sendDateTime(){
-    date_time = new Date();
-    return date_time.toLocaleString().replace(/\s+|[,\/]/g, "-");
+function getDate(){
+    var date = new Date;
+    const options = {
+    month: 'numeric',
+    day: 'numeric',
+    };
+    console.log(date.toLocaleDateString("pt-Br", options).replace("/", "-"));
+    return date.toLocaleDateString("pt-Br", options).replace("/", "-");
+}
+
+function getTime(){
+    var date = new Date;
+    const options = {
+        hour: "numeric",
+        minute: "numeric"
+        };
+        console.log(date.toLocaleTimeString("pt-Br", options));
+        return date.toLocaleTimeString("pt-Br", options);
 }
 // Atualiza a data e a hora a cada segundo, para ser exibida na página html
 function updateDateTime() {
@@ -61,31 +76,12 @@ function drawChart(empuxo, tempo){
     });
 }
 
-// envia mensagens de log ou msg de erro
-function logMessage(message) {
-    const logDiv = document.getElementById('log');
-    const newMessage = document.createElement('div');
-    newMessage.textContent = message;
-    logDiv.appendChild(newMessage);
-    logDiv.scrollTop = logDiv.scrollHeight; // Scroll to the bottom of the log
-}
-
-// Função para atualizar o conteúdo dos cards
-function updateInfo(infoId, newContent) {
-    const card = document.getElementById(infoId);
-    if (card) {
-        card.textContent = newContent;
-        console.log(`Atualizado ${infoId} com novo conteúdo: ${newContent}`);
-    } else {
-        console.log(`Erro: ${infoId} não encontrado`);
-    }
-}
-
 drawChart();
 
 
 function onLoad(event) {
     initWebSocket();
+    initButton();
 }
 function initWebSocket() {
     console.log('Trying to open a WebSocket connection...');
@@ -106,6 +102,7 @@ function onClose(event) {
 }
 
 function onMessage(event) {
+    console.log(event.data);
     var msg = JSON.parse(event.data);
     console.log(msg);
     if(msg.type == "sample"){
@@ -124,9 +121,11 @@ function initButton() {
     document.getElementById("sample_button").addEventListener("click", function(event){
         event.preventDefault();
         if(confirm("Deseja realmente iniciar?")){
-            let timestamp = sendDateTime();
-            websocket.send(JSON.stringify({"type":"sample_begin", "data":timestamp}));
-            console.log(timestamp);
+            let date = getDate();
+            let time = getTime();
+            websocket.send(JSON.stringify({"type":"sample_begin", "data":{"date":date, "time":time}}));
+            console.log("ws send: ", date);
+            console.log("ws send: ", time);
             document.getElementById("sample_button").disabled = true;
             setTimeout(function(){
                 document.getElementById("sample_button").disabled = false;},5000);

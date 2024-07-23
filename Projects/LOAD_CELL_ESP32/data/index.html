@@ -1,8 +1,9 @@
 <!DOCTYPE html>
-<html>
+<html lang="pt-br">
 <head>
     <title>TESTE ESTÁTICO</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset='UTF-8'>
     <link rel="stylesheet" type="text/css" href="style.css">
     <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
 </head>
@@ -15,7 +16,6 @@
 
     <section class="container">
         <div class="sidebar">
-            <div class="sidebar-text">Informações</div>
             <div class="card">
                 <p class="card-title">Status</p>
                 <p class="card-info" id="status_info">None</p>
@@ -31,20 +31,15 @@
         </div>
 
         <div class="buttons">
-            <button class="button" id="sample_button" onclick="">Iniciar amostragem</button>
+            <button class="button" id="sample_button">Iniciar amostragem</button>
         </div>
 
         <div class="main">
             <div class="chart">
                 <canvas id="myChart"></canvas>
             </div>
-            <div class="log" id="log"></div>
         </div>
     </section>
-
-    <div class="footer">
-        Asa Branca Aerospace - 2024
-    </div>
 
     <script src="chart.umd.js"></script>
     <script src="script.js"></script>
