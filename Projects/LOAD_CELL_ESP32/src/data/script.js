@@ -1,7 +1,7 @@
 // VARIAVEIS
 var gateway = `ws://${window.location.hostname}/ws`;
 var websocket;
-
+window.addEventListener('load', onLoad);
 
 // retorna uma string com a data e a hora, para servir de nome do arquivo de amostras 
 function sendDateTime(){
@@ -19,9 +19,7 @@ function updateDateTime() {
     datetimeDiv.textContent = now.toLocaleDateString('pt-BR', options);
 }
 // recebe os dados do ESP e armazena para construir o gráfico
-function dataStorage(){
 
-}
 var empuxo = [22, 24, 25, 30, 25, 28, 32, 25, 26, 27];
 var tempo = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 function drawChart(empuxo, tempo){
@@ -92,6 +90,7 @@ function onLoad(event) {
 function initWebSocket() {
     console.log('Trying to open a WebSocket connection...');
     websocket = new WebSocket(gateway);
+    // chama essas funções de callback quando ocorrer esses eventos
     websocket.onopen = onOpen;
     websocket.onclose = onClose;
     websocket.onmessage = onMessage;
@@ -99,7 +98,6 @@ function initWebSocket() {
 
 function onOpen(event) {
     console.log('Connection opened');
-    websocket.send("states");
 }
 
 function onClose(event) {
@@ -108,42 +106,32 @@ function onClose(event) {
 }
 
 function onMessage(event) {
-    var myObj = JSON.parse(event.data);
-    console.log(myObj);
-    for (i in myObj.gpios){
-        var output = myObj.gpios[i].output;
-        var state = myObj.gpios[i].state;
-        console.log(output);
-        console.log(state);
-        if (state == "1"){
-            document.getElementById(output).checked = true;
-            document.getElementById(output+"s").innerHTML = "ON";
+    var msg = JSON.parse(event.data);
+    console.log(msg);
+    if(msg.type == "sample"){
+        document.getElementById("last_reading").innerHTML = msg.data.reading;
+    }
+    else if(msg.type == "sd_status"){
+        document.getElementById("sd_info").innerHTML = msg.data;
+    }
+    else if(msg.type == "sample_running"){
+        document.getElementById("status_info").innerHTML = msg.data;
+    }    
+}
+
+function initButton() {
+    // botão de iniciar amostragem
+    document.getElementById("sample_button").addEventListener("click", function(event){
+        event.preventDefault();
+        if(confirm("Deseja realmente iniciar?")){
+            let timestamp = sendDateTime();
+            websocket.send(JSON.stringify({"type":"sample_begin", "data":timestamp}));
+            console.log(timestamp);
+            document.getElementById("sample_button").disabled = true;
+            setTimeout(function(){
+                document.getElementById("sample_button").disabled = false;},5000);
         }
-        else{
-        document.getElementById(output).checked = false;
-        document.getElementById(output+"s").innerHTML = "OFF";
-        }
-    }
-    console.log(event.data);
+    });
 }
-// Send Requests to Control GPIOs
-function toggleCheckbox (element) {
-    console.log(element.id);
-    websocket.send(element.id);
-    if (element.checked){
-        document.getElementById(element.id+"s").innerHTML = "ON";
-    }
-    else {
-        document.getElementById(element.id+"s").innerHTML = "OFF";
-    }
-}
-// Function to get and update GPIO states on the webpage when it loads for the first time
-function getStates(){
-    websocket.send("states");
-}
-window.addEventListener('load', onLoad);
 setInterval(updateDateTime, 1000);
-updateDateTime(); // Chama a função imediatamente para definir a data e a hora ao carregar a página
-// Exemplo de uso inicial para testar a função updateCard
-updateInfo('status_info', 'Stand-by');
-updateInfo('sd_info', 'Ok');
+updateDateTime();

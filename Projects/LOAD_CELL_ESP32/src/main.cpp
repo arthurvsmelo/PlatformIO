@@ -17,19 +17,20 @@
 #define CS GPIO_NUM_5           /* chip select do módulo SD card */
 /* 5: CS, 18: CLK, 19: MISO, 23: MOSI */
 
-typedef struct config{
-	uint16_t timeout;
-	float cal_param;
-	float prop_mass;
-} config_params;
+typedef struct {
+	uint16_t timeout = 10000;
+	float scale = -268.20;
+	float prop_mass = 1000;
+	float weight = 217.0;
+}config_t;
 
+config_t cfg;
+config_t *pCfg = &cfg;
 HX711 loadCell;
-float cal_param = -268.20;
 const float gravity = 9.789;
-uint16_t timeout = 10000;                /* timeout em milissegundos */
-File cfg;
-File log;
 String timestamp;
+File cfg_file;
+File log_file;
 volatile uint16_t timer_count = 0;
 bool sample_isrunning;
 /* Usuário e senha da rede local wifi */
@@ -51,7 +52,7 @@ void IRAM_ATTR Timer0_ISR()
 /* Protótipo de Funções */
 void calibrate(float weight);
 bool initSDcard(void);
-void checkSDconfig(void);
+void checkSDconfig(config_t* cfg);
 bool setConfig(String new_cfg);
 void SDWriteLog(void);
 String readLine(void);
@@ -71,16 +72,12 @@ void setup() {
 	gpio_init();
 	initLoadCell();
 	initWifi();
-	initWebSocket();	
+	initWebSocket();
+
+	checkSDconfig(pCfg);	
 }
 
 void loop() {
-	
-	while(timeout--){
-		
-	}
-	
-	vTaskDelay(12);
 	ws.cleanupClients();
 }
 
@@ -102,10 +99,10 @@ void calibrate(float weight){
 		vTaskDelay(1000);
 	}
 	cal = loadCell.get_units(10);
-	cal_param = cal / weight;
-	loadCell.set_scale(cal_param);
+	cfg.scale = cal / weight;
+	loadCell.set_scale(cfg.scale);
 	Serial.print("Nova escala: ");
-	Serial.println(cal_param);
+	Serial.println(cfg.scale);
 	Serial.println("Calibrado!");
 }
 /**
@@ -113,14 +110,21 @@ void calibrate(float weight){
  * 
  */
 bool initSDcard(void){
+	String json_output;
+	StaticJsonDocument<128> doc;
+	doc["type"] = "sd_status";
 	if (!SD.begin(CS)) {
     	Serial.println("Falha na inicializacao.");
-    	Serial.println("Cheque se ha cartao SD inserido ou se ha falha na conexao.");
-		Serial.println("Apos checar, perte o botao de reset.");
+		doc["data"] = "ERRO";
+		serializeJson(doc, json_output);
+		notifyClients(json_output);
     	return false;
 	}
 	else{
 		Serial.println("Cartao SD inicializado!");
+		doc["data"] = "OK";
+		serializeJson(doc, json_output);
+		notifyClients(json_output);
 	}
 	return true;
 }
@@ -129,22 +133,24 @@ bool initSDcard(void){
  * e aplica as configurações salva ao programa. Caso não exista, cria um novo
  * arquivo com as configurações padrão.
  */
-void checkSDconfig(void){
+void checkSDconfig(config_t* pcfg){
 	if(initSDcard()){
 		String temp;
 		/* checa se existe arquivo de configuração */
 		if(SD.exists("/config.txt")){
-			cfg = SD.open("/config.txt");
-			if(cfg){
+			cfg_file = SD.open("/config.txt");
+			if(cfg_file){
 				/* escreve as configurações padrão */
 				/* lê e define o fator de calibração */
 				temp = readLine();
-				cal_param = (float)temp.toInt();
-				/* lê define o timeout da amostragem */
+				pcfg->scale = temp.toFloat();
+				/* lê e define o timeout da amostragem */
 				temp = readLine();
-				timeout = temp.toInt();
+				pcfg->timeout = temp.toInt();
+				temp = readLine();
+				pcfg->weight = temp.toFloat();
 				Serial.println("Configuracoes feitas!");
-				cfg.close();
+				cfg_file.close();
 			}
 			else{
 				Serial.println("Erro ao abrir arquivo de configuracao!");
@@ -152,13 +158,14 @@ void checkSDconfig(void){
 		}
 		else{
 			/* se não existir arquivo de cfg, cria um novo */
-			cfg = SD.open("/config.txt", FILE_WRITE);
-			if(cfg){
+			cfg_file = SD.open("/config.txt", FILE_WRITE);
+			if(cfg_file){
 				/* escreve os valores padrão salvos hardcoded nas variaveis globais */
-				cfg.println((String)cal_param);
-				cfg.println((String)timeout);
+				cfg_file.println((String)pcfg->scale);
+				cfg_file.println((String)pcfg->timeout);
+				cfg_file.println((String)pcfg->weight);
 				Serial.println("Arquivo de configuracao criado com os valores padrão.");
-				cfg.close();
+				cfg_file.close();
 			}
 			else{
 				Serial.println("Erro ao criar arquivo de configuracao!");
@@ -175,11 +182,11 @@ void checkSDconfig(void){
  * @brief Funcao para ler uma linha do arquivo de configuração
  * @return String contendo a leitura de uma linha do arquivo
  */
-String readLine(void){
+String readLine(){
 	char c;
 	String line = "";
 	while(true){
-		c = cfg.read();
+		c = cfg_file.read();
     	line = line + c;
     	if(c == '\n'){
       		return line;
@@ -191,15 +198,9 @@ String readLine(void){
  */
 void initLoadCell(void){
 	loadCell.begin(LOAD_CELL_DOUT, LOAD_CELL_SCK, 128);
-	loadCell.set_scale(cal_param);
+	loadCell.set_scale(cfg.scale);
 	loadCell.tare();
 	Serial.println("Celula de carga iniciada.");
-}
-/**
- * @brief Escreve o arquivo de log da amostragem atual.
- */
-void SDWriteLog(void){
-
 }
 
 /**
@@ -267,17 +268,12 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
 	
 	if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
 		data[len] = 0;
-		if (strcmp((char*)data, "timestamp") == 0){
-			timestamp = (char*)data;
-		}
-		else if(strcmp((char*)data, "sample_begin") == 0){
-			/*sample_begin = true; */
-		}
-		else if(strcmp((char*)data, "set_config") == 0){
-
-		}
-		else if(strcmp((char*)data, "calibrate") == 0){
-
+		StaticJsonDocument<128> json_data;
+		deserializeJson(json_data, data);
+		String type = json_data["type"];
+		if(type == "sample_begin"){
+			timestamp = (const char*)json_data["data"];
+			sample(&cfg);
 		}
 	}
 }
@@ -288,34 +284,41 @@ void notifyClients(String message) {
 	ws.textAll(message);
 }
 
-bool sample(uint16_t timeout){
+bool sample(config_t* cfg){
 	uint16_t last_timer_count_value = timer_count;
-	uint16_t n = 0;
-	long read;
-	long max_value = 0;
-	long read_values[2400];
-	uint16_t time[2400];
-	sample_isrunning = true;
-	/* captura a string com a data e o horario */
+	uint16_t time = 0;
+	long reading;
+	String json_output;
+	StaticJsonDocument<128> doc;
+	doc["type"] = "sample";
+	JsonObject obj = doc.createNestedObject("data");
 	/* abre um arquivo de log na pasta /tests com o nome = data-hora */
-
-	while((timer_count - last_timer_count_value) <= timeout){
-		read = loadCell.get_units(1) * gravity;
-		if(read >= 10000.0){
-			read_values[n] = read;
-			time[n] = timer_count - last_timer_count_value;
+	log_file = SD.open("/tests/"+ timestamp + ".txt", FILE_WRITE);
+	log_file.println("reading,time");
+	sample_isrunning = true;
+	notifyClients("{'type':'status_info','data':'Running'}");
+	while((timer_count - last_timer_count_value) <= cfg->timeout){
+		reading = loadCell.get_units(1) * gravity;
+		if(reading >= 10000.0){
+			time = timer_count - last_timer_count_value;
 			/* salva a leitura no cartao sd */
-			/* envia uma string ou json contendo o valor */
-			if(read_values[n] > max_value)
-				max_value = read_values[n];
+			if(log_file){
+				log_file.print(reading);
+				log_file.print(",");
+				log_file.println(time);
+			}
+			/* constrói o json */
+			obj["reading"] = reading;
+			obj["time"] = time;
+			serializeJson(doc, json_output);
+			/* envia o json contendo o valor */
+			notifyClients(json_output);
 		}
-		n++;
 	}
-	/* faz os calculos restantes */
-	/* escreve */
 	/* fecha o arquivo de log */
-	/* envia mensagem de término */
+	cfg_file.close();
 	sample_isrunning = false;
+	notifyClients("{'type':'status_info','data':'Not running'}");
 	return true;
 }
 
@@ -328,5 +331,5 @@ void setTimer(void){
 }
 
 bool setConfig(String new_cfg){
-
+	int i = 0;
 }

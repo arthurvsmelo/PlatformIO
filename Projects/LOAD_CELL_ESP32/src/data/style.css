@@ -10,7 +10,7 @@ body {
     flex-direction: column;
 }
 .topnav {
-    background-color: #1E2019;
+    background-color: #40423c;
     color: white;
     text-align: center;
     font-size: 24px;
@@ -31,14 +31,14 @@ body {
     font-size: 24px;
 }
 .container {
-    background-color: #444;
+    background-color: #bebaba;
     width: 100%;
     display: flex;
     flex-direction: row;
     height: calc(100vh - 90px);
 }
 .sidebar {
-    background-color: #c4c5ce;
+    background-color: #bebaba;
     padding: 20px;
     width: 10%;
     height: 100%;
@@ -54,7 +54,7 @@ body {
     padding: 10px;
 }
 .card {
-    background-color: #898baa;
+    background-color: #bebaba;
     padding: 0px;
     border-radius: 5px;
     box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
@@ -73,7 +73,7 @@ body {
     text-transform: capitalize;
 }
 .buttons {
-    background-color: #989FCE;
+    background-color: #bebaba;
     padding: 20px;
     width: 10%;
     height: 100%;
@@ -129,7 +129,7 @@ body {
     display: flex;
 }
 .footer {
-    background-color: #1E2019;
+    background-color: #40423c;
     color: white;
     text-align: center;
     padding: 10px;
