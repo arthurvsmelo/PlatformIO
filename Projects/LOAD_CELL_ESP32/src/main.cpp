@@ -2,10 +2,17 @@
 #include <HX711.h>
 #include <esp32-hal-gpio.h>
 #include <esp32-hal-timer.h>
+
+#define CORE_DEBUG_LEVEL 3
+#define LOG_LOCAL_LEVEL ESP_LOG_INFO
+
+#include <esp_err.h>
+#include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <SPI.h>
 #include <SD.h>
+
 #include <WiFi.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
@@ -23,6 +30,13 @@ typedef struct {
 	float prop_mass = 1000;
 	float weight = 217.0;
 }config_t;
+
+static const char *TAG_SD = "SD";
+static const char *TAG_HX711 = "HX711";
+static const char *TAG_FS = "LittleFS";
+static const char *TAG_WIFI = "WiFi";
+static const char *TAG_WS = "WEBSOCKET";
+static const char *TAG_SAMPLE = "SAMPLE";
 
 config_t cfg;
 config_t *pCfg = &cfg;
@@ -56,7 +70,7 @@ bool initSDcard(void);
 void checkSDconfig(config_t* cfg);
 String readLine(void);
 void initLoadCell(void);
-bool initLittleFS(void);
+void initLittleFS(void);
 void initWifi(void);
 void initWebSocket(void);
 void sample(config_t* cfg);
@@ -67,7 +81,7 @@ void setTimer(void);
 
 void setup() {
 	gpio_set_direction(CS, GPIO_MODE_OUTPUT);
-	Serial.begin(115200);
+	setTimer();
 	initLittleFS();
 	initWifi();
 	initWebSocket();
@@ -81,7 +95,7 @@ void loop() {
 	if(start_sampling){
 		sample(&cfg);
 	}
-	vTaskDelay(10/portTICK_PERIOD_MS);
+	vTaskDelay(pdMS_TO_TICKS(500));
 }
 
 /* Funções */
@@ -95,18 +109,16 @@ void calibrate(float weight){
 	float cal = 0.0;
 	loadCell.set_scale();
 	loadCell.tare();
-	Serial.println("Ponha um peso conhecido na celula");
+	ESP_LOGI(TAG_HX711, "Ponha um peso conhecido na celula\n");
 	while(n--){
-		Serial.print(n);
-		Serial.println(" ...");
-		vTaskDelay(1000);
+		ESP_LOGI(TAG_HX711, "%i" , n);
+		vTaskDelay(pdMS_TO_TICKS(1000));
 	}
 	cal = loadCell.get_units(10);
 	cfg.scale = cal / weight;
 	loadCell.set_scale(cfg.scale);
-	Serial.print("Nova escala: ");
-	Serial.println(cfg.scale);
-	Serial.println("Calibrado!");
+	ESP_LOGI(TAG_HX711, "Nova escala: %f", cfg.scale);
+	ESP_LOGI(TAG_HX711, "Calibrado!\n");
 }
 /**
  * @brief Inicializa o cartão SD. 
@@ -117,14 +129,14 @@ bool initSDcard(void){
 	StaticJsonDocument<128> doc;
 	doc["type"] = "sd_status";
 	if (!SD.begin(CS)) {
-    	Serial.println("Falha na inicializacao.");
+    	ESP_LOGE(TAG_SD, "Falha na inicializacao.\n");
 		doc["data"] = "ERRO";
 		serializeJson(doc, json_output);
 		notifyClients(json_output);
     	return false;
 	}
 	else{
-		Serial.println("Cartao SD inicializado!");
+		ESP_LOGI(TAG_SD, "Cartao SD inicializado.\n");
 		doc["data"] = "OK";
 		serializeJson(doc, json_output);
 		notifyClients(json_output);
@@ -152,11 +164,11 @@ void checkSDconfig(config_t* pcfg){
 				pcfg->timeout = temp.toInt();
 				temp = readLine();
 				pcfg->weight = temp.toFloat();
-				Serial.println("Configuracoes feitas!");
+				ESP_LOGI(TAG_SD, "Configuracoes feitas!\n");
 				cfg_file.close();
 			}
 			else{
-				Serial.println("Erro ao abrir arquivo de configuracao!");
+				ESP_LOGE(TAG_SD, "Erro ao abrir arquivo de configuracao!\n");
 			}
 		}
 		else{
@@ -167,16 +179,16 @@ void checkSDconfig(config_t* pcfg){
 				cfg_file.println((String)pcfg->scale);
 				cfg_file.println((String)pcfg->timeout);
 				cfg_file.println((String)pcfg->weight);
-				Serial.println("Arquivo de configuracao criado com os valores padrão.");
+				ESP_LOGI(TAG_SD, "Arquivo de configuracao criado com os valores padrão.\n");
 				cfg_file.close();
 			}
 			else{
-				Serial.println("Erro ao criar arquivo de configuracao!");
+				ESP_LOGE(TAG_SD, "Erro ao criar arquivo de configuracao!\n");
 			}
 		}
 	}
 	else{
-		Serial.println("Falha na configuracao.");
+		ESP_LOGE(TAG_SD, "Falha na configuracao.\n");
 		return;
 	}		
 }
@@ -203,7 +215,7 @@ void initLoadCell(void){
 	loadCell.begin(LOAD_CELL_DOUT, LOAD_CELL_SCK, 128);
 	loadCell.set_scale(cfg.scale);
 	loadCell.tare();
-	Serial.println("Celula de carga iniciada.");
+	ESP_LOGI(TAG_HX711, "Celula de carga iniciada.\n");
 }
 
 /**
@@ -212,8 +224,7 @@ void initLoadCell(void){
 void initWifi(void){
 	WiFi.softAP(ssid, password);
 	IPAddress IP = WiFi.softAPIP();
-	Serial.print("IP do ponto de acesso: ");
-	Serial.println(IP);
+	ESP_LOGI(TAG_WIFI, "IP do ponto de acesso: %s", IP.toString().c_str());
 }
 /**
  * @brief Inicia o LittleFS para ler os arquivos da página HTML.
@@ -221,13 +232,12 @@ void initWifi(void){
  * @return true, se obteve sucesso;
  * @return false, se houve erro
  */
-bool initLittleFS(void){
+void initLittleFS(void){
 	if (!LittleFS.begin(true)) {
-    	Serial.println("Erro ao montar LittleFS");
-    	return false;
+    	ESP_LOGE(TAG_FS, "Erro ao montar LittleFS");
   	}
 	else{
-		return true;
+		ESP_LOGI(TAG_FS, "LittleFS montado.\n");
 	}
 }
 /**
@@ -242,6 +252,7 @@ void initWebSocket(void){
 	server.serveStatic("/", LittleFS, "/");
 	/* Inicia servidor */
 	server.begin();
+	ESP_LOGI(TAG_WS, "Websocket iniciado.\n");
 }
 
 void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,AwsEventType type, 
@@ -249,10 +260,10 @@ void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,AwsEventType t
 	
 	switch (type) {
 		case WS_EVT_CONNECT:
-			Serial.printf("WebSocket client #%u connected from %s\n", client->id(), client->remoteIP().toString().c_str());
+			ESP_LOGI(TAG_WS, "WebSocket client #%u connected from %s\n", client->id(), client->remoteIP().toString().c_str());
 			break;
 		case WS_EVT_DISCONNECT:
-			Serial.printf("WebSocket client #%u disconnected\n", client->id());
+			ESP_LOGI(TAG_WS, "WebSocket client #%u disconnected\n", client->id());
 			break;
 		case WS_EVT_DATA:
 			handleWebSocketMessage(arg, data, len);
@@ -298,14 +309,18 @@ void sample(config_t* cfg){
 	doc["type"] = "sample";
 	JsonObject obj = doc.createNestedObject("data");
 	/* abre um arquivo de log na pasta /tests com o nome = data-hora */
-	log_file = SD.open("/" + hour + ".txt", FILE_WRITE);
+	log_file = SD.open("/test.txt", FILE_WRITE);
+	if(log_file)
+		ESP_LOGI(TAG_SAMPLE, "Arquivo criado com sucesso.\n");
+	else
+		ESP_LOGE(TAG_SAMPLE, "Erro ao criar arquivo.\n");
 	log_file.println("reading,time");
 	notifyClients("{'type':'status_info','data':'Running'}");
 	while((timer_count - last_timer_count_value) <= cfg->timeout){
 		reading = loadCell.get_units(1) * gravity;
 		if(reading >= 10000.0){
 			time = timer_count - last_timer_count_value;
-			Serial.println(time);
+			ESP_LOGI(TAG_SAMPLE, "Time: %d ms, Reading: %ld\n", time, reading);
 			/* salva a leitura no cartao sd */
 			if(log_file){
 				log_file.print(reading);
@@ -318,13 +333,14 @@ void sample(config_t* cfg){
 			serializeJson(doc, json_output);
 			/* envia o json contendo o valor */
 			notifyClients(json_output);
+			vTaskDelay(pdMS_TO_TICKS(13));
 		}
 	}
 	/* fecha o arquivo de log */
 	log_file.close();
 	start_sampling = false;
 	notifyClients("{'type':'status_info','data':'Not running'}");
-	Serial.println("Amostragem finalizada.");
+	ESP_LOGI(TAG_SAMPLE, "Amostragem finalizada.\n");
 }
 
 void setTimer(void){
