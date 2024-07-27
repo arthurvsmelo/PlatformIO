@@ -12,7 +12,7 @@
 #include <freertos/task.h>
 #include <freertos/queue.h>
 #include <SPI.h>
-#include <SdFat.h>
+#include <SD.h>
 #include <WiFi.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
@@ -47,11 +47,10 @@ static const char *TAG_RTOS = "RTOS";
 config_t cfg;
 config_t *pCfg = &cfg;
 HX711 loadCell;
-const char* hour;
-const char* date;
-SdFat SD;
-SdFile cfg_file;
-SdFile log_file;
+String hour;
+String date;
+SDLib::File cfg_file;
+SDLib::File log_file;
 volatile uint16_t timer_count = 0;
 const char* ssid = "ESP32_AP";
 const char* password = "decola_asa";
@@ -141,7 +140,7 @@ bool initSDcard(void){
 	String json_output;
 	StaticJsonDocument<128> doc;
 	doc["type"] = "sd_status";
-	if (!SD.begin(CS, SD_SCK_MHZ(40))) {
+	if (!SD.begin(CS)) {
     	ESP_LOGE(TAG_SD, "Falha na inicializacao.\n");
 		doc["data"] = "ERRO";
 		serializeJson(doc, json_output);
@@ -166,7 +165,7 @@ void checkSDconfig(config_t* pcfg){
 		String temp;
 		/* checa se existe arquivo de configuração */
 		if(SD.exists("/config.txt")){
-			cfg_file.open("/config.txt", O_RDONLY);
+			cfg_file = SD.open("/config.txt");
 			if(cfg_file){
 				/* escreve as configurações padrão */
 				/* lê e define o fator de calibração */
@@ -186,7 +185,7 @@ void checkSDconfig(config_t* pcfg){
 		}
 		else{
 			/* se não existir arquivo de cfg, cria um novo */
-			cfg_file.open("/config.txt", O_WRITE|O_CREAT|O_SYNC);
+			cfg_file = SD.open("/config.txt", FILE_WRITE);
 			if(cfg_file){
 				/* escreve os valores padrão salvos hardcoded nas variaveis globais */
 				cfg_file.println((String)pcfg->scale);
@@ -320,13 +319,8 @@ void readingTask(void *pvParameters) {
 
   	while (1) {
     	if (startReading) {
-			char* filename = "/";
-			strcat(filename, (const char*)date);
-			strcat(filename, "/");
-			strcat(filename, (const char*)hour);
-			strcat(filename, ".csv");
 			/* Abre o arquivo no SD */
-			log_file.open((const char*)filename, O_APPEND | O_WRONLY | O_CREAT | O_SYNC);
+			log_file = SD.open("/"+hour, FILE_APPEND);
 			if(log_file)
 				ESP_LOGI(TAG_SAMPLE, "Arquivo criado com sucesso.\n");
 			else
