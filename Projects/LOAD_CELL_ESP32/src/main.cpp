@@ -11,7 +11,6 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/queue.h>
-#include <SPI.h>
 #include <SD.h>
 #include <WiFi.h>
 #include <AsyncTCP.h>
@@ -49,8 +48,8 @@ config_t *pCfg = &cfg;
 HX711 loadCell;
 String hour;
 String date;
-SDLib::File cfg_file;
-SDLib::File log_file;
+File cfg_file;
+File log_file;
 volatile uint16_t timer_count = 0;
 const char* ssid = "ESP32_AP";
 const char* password = "decola_asa";
@@ -319,8 +318,9 @@ void readingTask(void *pvParameters) {
 
   	while (1) {
     	if (startReading) {
+			ESP_LOGI(TAG_SAMPLE, "Amostragem...\n");
 			/* Abre o arquivo no SD */
-			log_file = SD.open("/"+hour, FILE_APPEND);
+			log_file = SD.open("/log.csv", FILE_APPEND);
 			if(log_file)
 				ESP_LOGI(TAG_SAMPLE, "Arquivo criado com sucesso.\n");
 			else
@@ -333,10 +333,10 @@ void readingTask(void *pvParameters) {
 			last_timer_count_value = timer_count;
 			/* Continua a leitura enquanto startReading for true e dentro do timeout */
 			while (startReading && (xTaskGetTickCount() - startTime) < timeout) {
-
+				ESP_LOGI(TAG_SAMPLE, "Lendo...\n");
 				reading.value = loadCell.get_units(1) * gravity;
 
-				if (reading.value >= 1000.0) {
+				if (reading.value != 0.0) {
 					reading.time = timer_count - last_timer_count_value;
 					ESP_LOGI(TAG_SAMPLE, "Time: %d ms, Reading: %ld\n", reading.time, reading.value);
 					/* salva a leitura no cartao sd */
@@ -349,10 +349,15 @@ void readingTask(void *pvParameters) {
 					if (xQueueSend(dataQueue, &reading, portMAX_DELAY) != pdPASS) {
 						ESP_LOGE(TAG_RTOS, "Erro ao enviar para a fila.\n");
 					}
+					last_timer_count_value = timer_count;
+					vTaskDelay(pdMS_TO_TICKS(15));
 				}
-				last_timer_count_value = timer_count;
-				/* Aguarda 15ms */
-				vTaskDelay(pdMS_TO_TICKS(15));
+				else{
+					ESP_LOGI(TAG_SAMPLE, "Valor nao lido.\n");
+					last_timer_count_value = timer_count;
+					/* Aguarda 15ms */
+					vTaskDelay(pdMS_TO_TICKS(15));
+				}
 			}
 			/* Fecha o arquivo quando startReading for false ou timeout */
 			log_file.close();
@@ -371,8 +376,10 @@ void webSocketSendTask(void *pvParameters) {
 	StaticJsonDocument<96> json;
 	String message;
   	while (1) {
+		ESP_LOGI(TAG_WS, "ws Task enter.\n");
     	/* Verifica se há dados na fila */
     	if (xQueueReceive(dataQueue, &sample, portMAX_DELAY) == pdPASS) {
+			ESP_LOGI(TAG_WS, "Dado lido da fila\n");
 			json["type"] = "sample";
 			JsonObject data = json.createNestedObject("data");
 			data["value"] = String(sample.value);
@@ -393,8 +400,8 @@ void monitorTask(void *pvParameters) {
 		UBaseType_t webSocketSendTaskStack = uxTaskGetStackHighWaterMark(webSocketSendTaskHandle);
 
 		// Imprime o uso da stack na Serial
-		ESP_LOGI(TAG_RTOS, "Stack high water mark - Reading Task: %d\n", readingTaskStack);
-		ESP_LOGI(TAG_RTOS, "Stack high water mark - WebSocket Send Task: %d\n", webSocketSendTaskStack);
+		ESP_LOGI(TAG_RTOS, "Reading Task: %d\n", readingTaskStack);
+		ESP_LOGI(TAG_RTOS, "WebSocket Send Task: %d\n", webSocketSendTaskStack);
 
 		// Aguarda 5 segundos antes de verificar novamente
 		vTaskDelay(pdMS_TO_TICKS(5000));
