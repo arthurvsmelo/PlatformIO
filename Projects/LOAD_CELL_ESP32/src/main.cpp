@@ -21,7 +21,7 @@
 #define LOAD_CELL_DOUT GPIO_NUM_32
 #define LOAD_CELL_SCK  GPIO_NUM_33
 #define CS GPIO_NUM_5           /* chip select do módulo SD card = 5: CS, 18: CLK, 19: MISO, 23: MOSI */
-#define QUEUE_SIZE 1024
+#define QUEUE_SIZE 512
 
 typedef struct {
 	uint16_t timeout = 10000;
@@ -46,11 +46,10 @@ static const char *TAG_RTOS = "RTOS";
 config_t cfg;
 config_t *pCfg = &cfg;
 HX711 loadCell;
-String hour;
-String date;
+String hour = "";
+String date = "";
 File cfg_file;
 File log_file;
-volatile uint16_t timer_count = 0;
 const char* ssid = "ESP32_AP";
 const char* password = "decola_asa";
 const float gravity = 9.789;
@@ -60,14 +59,7 @@ QueueHandle_t dataQueue;
 TaskHandle_t readingTaskHandle = NULL;
 TaskHandle_t webSocketSendTaskHandle = NULL;
 bool startReading = false;
-
-void IRAM_ATTR Timer0_ISR()
-{
-	if(timer_count >= 65535)
-		timer_count = 0;
-	else
-    	timer_count++;
-}
+bool sdStatus = false;
 
 /* Protótipo de Funções */
 void calibrate(float weight);
@@ -80,10 +72,8 @@ void initWifi(void);
 void initWebSocket(void);
 void handleWebSocketMessage(void *arg, uint8_t *data, size_t len);
 void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,AwsEventType type, void *arg, uint8_t *data, size_t len);
-void setTimer(void);
 void readingTask(void *pvParameters);
 void webSocketSendTask(void *pvParameters);
-void monitorTask(void *pvParameters);
 
 /* ============================================================================================================================= */
 void setup() {
@@ -93,16 +83,14 @@ void setup() {
   	if (dataQueue == NULL) {
     	ESP_LOGE(TAG_RTOS, "Erro ao criar a fila\n");
   	}
-	setTimer();
 	initLittleFS();
+	checkSDconfig(pCfg);
 	initWifi();
 	initWebSocket();
 	initLoadCell();
-	initSDcard();
-	checkSDconfig(pCfg);
 	xTaskCreatePinnedToCore(readingTask, "Reading Task", 8192, NULL, 2, NULL, 0);
   	xTaskCreatePinnedToCore(webSocketSendTask, "WebSocket Send Task", 8192, NULL, 1, NULL, 0);
-	xTaskCreatePinnedToCore(monitorTask, "Monitor Task", 2048, NULL, 1, NULL, 0);	
+	
 }
 
 void loop() {
@@ -136,21 +124,12 @@ void calibrate(float weight){
  * 
  */
 bool initSDcard(void){
-	String json_output;
-	StaticJsonDocument<128> doc;
-	doc["type"] = "sd_status";
 	if (!SD.begin(CS)) {
     	ESP_LOGE(TAG_SD, "Falha na inicializacao.\n");
-		doc["data"] = "ERRO";
-		serializeJson(doc, json_output);
-		ws.textAll(json_output);
     	return false;
 	}
 	else{
 		ESP_LOGI(TAG_SD, "Cartao SD inicializado.\n");
-		doc["data"] = "OK";
-		serializeJson(doc, json_output);
-		ws.textAll(json_output);
 	}
 	return true;
 }
@@ -161,7 +140,8 @@ bool initSDcard(void){
  */
 void checkSDconfig(config_t* pcfg){
 	if(initSDcard()){
-		String temp;
+		sdStatus = true;
+		String temp = "";
 		/* checa se existe arquivo de configuração */
 		if(SD.exists("/config.txt")){
 			cfg_file = SD.open("/config.txt");
@@ -200,6 +180,7 @@ void checkSDconfig(config_t* pcfg){
 	}
 	else{
 		ESP_LOGE(TAG_SD, "Falha na configuracao.\n");
+		sdStatus = false;
 		return;
 	}		
 }
@@ -301,28 +282,39 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
 			hour = (const char*)json_data["data"]["time"];
 			startReading = true;
 		}
+		else if(type == "sd_status"){
+			StaticJsonDocument<96> json;
+			String message = "";
+			json["type"] = "sd_status";
+			json["data"] = String(sdStatus);
+			serializeJson(json, message);
+      		ws.textAll(message);
+		}
+		else if(type == "sample_running"){
+			StaticJsonDocument<96> json;
+			String message = "";
+			json["type"] = "sample_running";
+			json["data"] = String(startReading);
+			serializeJson(json, message);
+      		ws.textAll(message);
+		}
 	}
 }
 
-void setTimer(void){
-	hw_timer_t *Timer0_Cfg = NULL;
-	Timer0_Cfg = timerBegin(0, 80, true);
-	timerAttachInterrupt(Timer0_Cfg, &Timer0_ISR, false);
-    timerAlarmWrite(Timer0_Cfg, 1000, true);
-    timerAlarmEnable(Timer0_Cfg);
-}
-
 void readingTask(void *pvParameters) {
-	uint16_t last_timer_count_value = 0;
+	TickType_t time_interval = 0;
 	sample_data_t reading;
+	String filename = "";
 
   	while (1) {
     	if (startReading) {
+			filename = "/" + date + hour + ".csv";
 			ESP_LOGI(TAG_SAMPLE, "Amostragem...\n");
 			/* Abre o arquivo no SD */
-			log_file = SD.open("/log.csv", FILE_APPEND);
-			if(log_file)
-				ESP_LOGI(TAG_SAMPLE, "Arquivo criado com sucesso.\n");
+			ESP_LOGI(TAG_SAMPLE, "Full filename %s\n", filename);
+			log_file = SD.open(filename, FILE_WRITE);
+			if (log_file)
+				ESP_LOGI(TAG_SAMPLE, "Arquivo %s criado com sucesso.\n", filename);
 			else
 				ESP_LOGE(TAG_SAMPLE, "Erro ao criar arquivo.\n");
 			log_file.println("reading,time");
@@ -330,15 +322,15 @@ void readingTask(void *pvParameters) {
 			/* Configura o timeout de 10 segundos */
 			TickType_t startTime = xTaskGetTickCount();
 			const TickType_t timeout = pdMS_TO_TICKS(pCfg->timeout);
-			last_timer_count_value = timer_count;
+		
 			/* Continua a leitura enquanto startReading for true e dentro do timeout */
 			while (startReading && (xTaskGetTickCount() - startTime) < timeout) {
-				ESP_LOGI(TAG_SAMPLE, "Lendo...\n");
 				reading.value = loadCell.get_units(1) * gravity;
 
 				if (reading.value != 0.0) {
-					reading.time = timer_count - last_timer_count_value;
-					ESP_LOGI(TAG_SAMPLE, "Time: %d ms, Reading: %ld\n", reading.time, reading.value);
+					time_interval = xTaskGetTickCount() - startTime;
+					reading.time = (uint16_t)time_interval;
+					ESP_LOGI(TAG_SAMPLE, "Time: %d ms, Reading: %.3f\n", reading.time, reading.value);
 					/* salva a leitura no cartao sd */
 					if (log_file) {
 						log_file.print(reading.value);
@@ -349,14 +341,11 @@ void readingTask(void *pvParameters) {
 					if (xQueueSend(dataQueue, &reading, portMAX_DELAY) != pdPASS) {
 						ESP_LOGE(TAG_RTOS, "Erro ao enviar para a fila.\n");
 					}
-					last_timer_count_value = timer_count;
-					vTaskDelay(pdMS_TO_TICKS(15));
+					vTaskDelay(pdMS_TO_TICKS(15U));
 				}
 				else{
-					ESP_LOGI(TAG_SAMPLE, "Valor nao lido.\n");
-					last_timer_count_value = timer_count;
 					/* Aguarda 15ms */
-					vTaskDelay(pdMS_TO_TICKS(15));
+					vTaskDelay(pdMS_TO_TICKS(15U));
 				}
 			}
 			/* Fecha o arquivo quando startReading for false ou timeout */
@@ -366,7 +355,7 @@ void readingTask(void *pvParameters) {
 		}
 		else {
 			/* Aguarda até que startReading seja true */
-			vTaskDelay(pdMS_TO_TICKS(100));
+			vTaskDelay(pdMS_TO_TICKS(100U));
 		}
 	}
 }
@@ -374,7 +363,7 @@ void readingTask(void *pvParameters) {
 void webSocketSendTask(void *pvParameters) {
 	sample_data_t sample;
 	StaticJsonDocument<96> json;
-	String message;
+	String message = "";
   	while (1) {
 		ESP_LOGI(TAG_WS, "ws Task enter.\n");
     	/* Verifica se há dados na fila */
@@ -386,24 +375,9 @@ void webSocketSendTask(void *pvParameters) {
 			data["time"] = String(sample.time);
 			serializeJson(json, message);
       		
-      		ws.textAll(message);
+      		ws.textAll(message); /* esta resetando a cpu aqui */
 			ESP_LOGI(TAG_WS, "msg enviada para ws.\n");
     	}
-    	vTaskDelay(pdMS_TO_TICKS(60));
+    	vTaskDelay(pdMS_TO_TICKS(60U));
   	}
-}
-
-void monitorTask(void *pvParameters) {
-	while (1) {
-		// Obtém o uso da stack das tasks
-		UBaseType_t readingTaskStack = uxTaskGetStackHighWaterMark(readingTaskHandle);
-		UBaseType_t webSocketSendTaskStack = uxTaskGetStackHighWaterMark(webSocketSendTaskHandle);
-
-		// Imprime o uso da stack na Serial
-		ESP_LOGI(TAG_RTOS, "Reading Task: %d\n", readingTaskStack);
-		ESP_LOGI(TAG_RTOS, "WebSocket Send Task: %d\n", webSocketSendTaskStack);
-
-		// Aguarda 5 segundos antes de verificar novamente
-		vTaskDelay(pdMS_TO_TICKS(5000));
-	}
 }

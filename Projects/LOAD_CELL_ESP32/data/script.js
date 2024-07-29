@@ -2,6 +2,8 @@
 var gateway = `ws://${window.location.hostname}/ws`;
 var websocket;
 window.addEventListener('load', onLoad);
+var sample_value = [];
+var sample_time = [];
 
 // retorna uma string com a data e a hora, para servir de nome do arquivo de amostras 
 function getDate(){
@@ -10,8 +12,7 @@ function getDate(){
     month: 'numeric',
     day: 'numeric',
     };
-    console.log(date.toLocaleDateString("pt-Br", options).replace("/", "-"));
-    return date.toLocaleDateString("pt-Br", options).replace("/", "-");
+    return date.toLocaleDateString("pt-Br", options).replace("/", "");
 }
 
 function getTime(){
@@ -20,8 +21,7 @@ function getTime(){
         hour: "numeric",
         minute: "numeric"
         };
-        console.log(date.toLocaleTimeString("pt-Br", options));
-        return date.toLocaleTimeString("pt-Br", options);
+        return date.toLocaleTimeString("pt-Br", options).replace(":", "");
 }
 // Atualiza a data e a hora a cada segundo, para ser exibida na página html
 function updateDateTime() {
@@ -33,51 +33,6 @@ function updateDateTime() {
     };
     datetimeDiv.textContent = now.toLocaleDateString('pt-BR', options);
 }
-// recebe os dados do ESP e armazena para construir o gráfico
-
-var empuxo = [22, 24, 25, 30, 25, 28, 32, 25, 26, 27];
-var tempo = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-function drawChart(empuxo, tempo){
-    // Configuração do gráfico usando Chart.js
-    var ctx = document.getElementById('myChart').getContext('2d');
-    var myChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-            datasets: [{
-                label: 'Empuxo (N)',
-                data: [12, 19, 25, 30, 18, 20, 32, 25, 18, 27],
-                backgroundColor: 'rgba(153, 165, 195, 0.6)',
-                borderColor: 'rgba(15, 15, 15, 0.85)',
-                borderWidth: 2,
-                borderJoinStyle: 'round',
-                fill: 'origin',
-                tension: 0.2
-            }]
-        },
-        options: {
-            scales: {
-                yAxes: [{
-                    ticks: {
-                        beginAtZero: true
-                    }
-                }],
-            },
-            plugins: {
-                legend: {
-                    labels: {
-                        font: {
-                            size: 20
-                        }
-                    }
-                }
-            }
-        }
-    });
-}
-
-drawChart();
-
 
 function onLoad(event) {
     initWebSocket();
@@ -94,11 +49,15 @@ function initWebSocket() {
 
 function onOpen(event) {
     console.log('Connection opened');
+    if (websocket.readyState == 1) {
+        getSdStatus();
+        getSampleStatus();
+    }
 }
 
 function onClose(event) {
     console.log('Connection closed');
-    setTimeout(initWebSocket, 2000);
+    setTimeout(initWebSocket, 1000);
 }
 
 function onMessage(event) {
@@ -109,10 +68,21 @@ function onMessage(event) {
         document.getElementById("last_reading").innerHTML = msg.data.reading;
     }
     else if(msg.type == "sd_status"){
-        document.getElementById("sd_info").innerHTML = msg.data;
+        if(msg.data == 0){
+            document.getElementById("sd_info").innerHTML = "Error!";
+        }
+        else{
+            document.getElementById("sd_info").innerHTML = "Ok";
+        }
+        
     }
     else if(msg.type == "sample_running"){
-        document.getElementById("status_info").innerHTML = msg.data;
+        if(msg.data == 0){
+            document.getElementById("status_info").innerHTML = "StandBy";
+        }
+        else{
+            document.getElementById("status_info").innerHTML = "Running";
+        }
     }    
 }
 
@@ -126,11 +96,15 @@ function initButton() {
             websocket.send(JSON.stringify({"type":"sample_begin", "data":{"date":date, "time":time}}));
             console.log("ws send: ", date);
             console.log("ws send: ", time);
-            document.getElementById("sample_button").disabled = true;
-            setTimeout(function(){
-                document.getElementById("sample_button").disabled = false;},5000);
         }
     });
+}
+
+function getSdStatus(){
+    websocket.send(JSON.stringify({"type":"sd_status"}));
+}
+function getSampleStatus(){
+    websocket.send(JSON.stringify({"type":"sample_running"}));
 }
 setInterval(updateDateTime, 1000);
 updateDateTime();
